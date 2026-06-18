@@ -555,7 +555,7 @@
                     
                     <!-- Showcase Image container -->
                     <div class="w-full h-60 bg-slate-50 rounded-2xl flex items-center justify-center overflow-hidden border border-slate-100 p-4 mb-6 relative">
-                        <img id="mImg" class="max-h-full max-w-full object-contain drop-shadow-md">
+                        <img id="mImg" class="max-h-full max-w-full object-contain drop-shadow-md" onerror="handleModalImageError(this)">
                         <div class="absolute top-3 left-3 bg-blue-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-widest font-poppins">
                             Premium LEO Series
                         </div>
@@ -803,11 +803,58 @@
         let orders = JSON.parse(localStorage.getItem("leoOrders")) || [];
         let selectedCategory = "All";
 
+        // Keep track of retry mutations attempts for each image element to prevent loops
+        const imageRetriesMap = new Map();
 
-        /* Dynamic SVG Product Fallbacks (In case local images fail in user browser) */
-        function handleImageError(img, name) {
-            img.onerror = null; // Kill infinite callbacks
+        /* Dynamic Case-Insensitive Image Fallback Resolver */
+        function handleImageError(img, name, originalPath) {
+            if (!imageRetriesMap.has(img)) {
+                imageRetriesMap.set(img, 0);
+            }
             
+            const attempt = imageRetriesMap.get(img);
+            
+            // Clean filename and folder path to perform standard Linux case-sensitivity mutations
+            const folder = "images/";
+            const filenameWithExt = originalPath.substring(originalPath.lastIndexOf("/") + 1);
+            const filename = filenameWithExt.substring(0, filenameWithExt.lastIndexOf("."));
+            const ext = ".png";
+
+            // List of case structures commonly utilized by designers during folder creation
+            const mutations = [
+                // 1. Title Case / Pascal Case words (e.g. Bib_Tap.png)
+                folder + filename.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('_') + ext,
+                // 2. ONLY capitalize first character of full filename (e.g. Bib_tap.png)
+                folder + filename.charAt(0).toUpperCase() + filename.slice(1) + ext,
+                // 3. Lowercase (e.g. bib_tap.png)
+                folder + filename.toLowerCase() + ext,
+                // 4. Uppercase (e.g. BIB_TAP.png)
+                folder + filename.toUpperCase() + ext,
+                // 5. Replace 'piller' with 'pillar' (Standard spelling of tap pillar)
+                folder + filename.replace(/piller/gi, "Pillar").replace(/Piller/gi, "Pillar") + ext,
+                // 6. Title case with pillar correction
+                folder + filename.replace(/piller/gi, "Pillar").split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('_') + ext,
+                // 7. Capitalize specific Valve and Tap initials
+                folder + filename.replace("valve", "Valve").replace("tap", "Tap").replace("black", "Black").replace("red", "Red") + ext,
+                // 8. Try .PNG uppercase extension format
+                folder + filename + ".PNG"
+            ];
+
+            // Filter unique variants that differ from original failing path
+            const uniqueMutations = Array.from(new Set(mutations)).filter(m => m !== originalPath);
+
+            if (attempt < uniqueMutations.length) {
+                const nextSrc = uniqueMutations[attempt];
+                imageRetriesMap.set(img, attempt + 1);
+                img.src = nextSrc;
+            } else {
+                // If all sequential variants trigger 404, replace with custom SVG asset block
+                renderSvgPlaceholder(img, name);
+            }
+        }
+
+        /* Renders a beautiful fallback vector component if no file path matches */
+        function renderSvgPlaceholder(img, name) {
             let iconClass = "fa-faucet";
             let bgGradient = "from-blue-50 to-indigo-50";
             let iconColor = "text-blue-500";
@@ -847,7 +894,7 @@
                     <div class="absolute bottom-1.5 right-2 text-[8px] font-black tracking-widest text-slate-400 bg-white/80 px-1.5 py-0.5 rounded border border-slate-100 uppercase">LEO</div>
                 `;
                 
-                // Clicking placeholder also fires quick view modal
+                // Keep modal opening working from the placeholder too
                 placeholder.onclick = () => {
                     const originalIndex = products.findIndex(item => item.name === name);
                     let price = products[originalIndex].price ? products[originalIndex].price : Object.values(products[originalIndex].sizes)[0];
@@ -856,6 +903,12 @@
                 
                 parent.replaceChild(placeholder, img);
             }
+        }
+
+        /* Fallback for the Quick-View modal showcase */
+        function handleModalImageError(img) {
+            img.onerror = null;
+            img.src = "https://via.placeholder.com/300x300/f8fafc/0f172a?text=LEO+Sanitaryware";
         }
 
 
@@ -896,7 +949,6 @@
                         </div>
                     `;
                 } else {
-                    
                     // Standard spacing block to keep visual heights matching exactly
                     sizeHTML = `<div class="h-8 mt-2"></div>`;
                 }
@@ -907,7 +959,8 @@
 
                 div.innerHTML = `
                     <div class="relative w-full h-40 flex items-center justify-center bg-slate-50/70 rounded-xl overflow-hidden mb-3 border border-slate-100">
-                        <img src="${p.img}" onclick="openModal('${p.img}','${p.name}','${price}')" class="max-h-32 max-w-[85%] object-contain transition-transform duration-500 group-hover:scale-105 cursor-pointer" onerror="handleImageError(this, '${p.name}')">
+                        <!-- We pass this.src so the modal gets the successfully resolved URL variation directly -->
+                        <img src="${p.img}" onclick="openModal(this.src, '${p.name}', '${price}')" class="max-h-32 max-w-[85%] object-contain transition-transform duration-500 group-hover:scale-105 cursor-pointer" onerror="handleImageError(this, '${p.name}', '${p.img}')">
                         <span class="absolute top-2 left-2 text-[9px] font-bold bg-blue-600/10 text-blue-700 px-2 py-0.5 rounded-full">WHOLESALE</span>
                     </div>
 
@@ -964,11 +1017,6 @@
             } else {
                 mImg.src = imgSrc;
             }
-            
-            mImg.onerror = function() {
-                this.onerror = null;
-                this.src = "https://via.placeholder.com/300x300/f8fafc/0f172a?text=LEO+Sanitary";
-            };
             
             mName.innerText = name;
             mPrice.innerText = "₹" + price;
@@ -1225,7 +1273,6 @@
                 return;
             }
 
-
             // --- ACCOUNT REGISTRATION DETAILS VALIDATION STEP ---
             const accData = JSON.parse(localStorage.getItem("leoAccount")) || {};
             const fieldsToVerify = [
@@ -1269,7 +1316,7 @@
                 });
                 return;
             }
-            
+            // ---------------------------------------------------
 
             let total = cart.reduce((sum, item) => sum + item.total, 0);
 
